@@ -159,7 +159,7 @@ def transcribe(audio_path: str, lang: str, api_key: str, verbose: bool = True) -
 def main():
     parser = argparse.ArgumentParser(description="Transcribe audio via Yandex SpeechKit")
     parser.add_argument("audio", help="Path to audio file (m4a, mp3, wav, ogg, ...)")
-    parser.add_argument("--lang", default="ru-RU", help="Language code (default: ru-RU)")
+    parser.add_argument("--lang", default="auto", help="Language code (default: auto)")
     parser.add_argument("--output", help="Output text file (default: <audio_name>.txt)")
     parser.add_argument("--quiet", action="store_true", help="Suppress progress output")
     args = parser.parse_args()
@@ -176,7 +176,7 @@ def main():
 
     output_path = args.output or str(Path(audio_path).with_suffix(".txt"))
 
-    text = transcribe(audio_path, args.lang, api_key, verbose=not args.quiet)
+    text = transcribe(audio_path, lang=args.lang, api_key=api_key, verbose=not args.quiet)
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(text)

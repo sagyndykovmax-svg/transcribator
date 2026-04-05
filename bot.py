@@ -53,7 +53,7 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await tg_file.download_to_drive(audio_path)
 
         try:
-            text = transcribe(audio_path, lang="ru-RU", api_key=YANDEX_API_KEY, verbose=False)
+            text = transcribe(audio_path, lang="auto", api_key=YANDEX_API_KEY, verbose=False)
         except Exception as e:
             logger.error("Transcription error: %s", e)
             await message.reply_text(f"Ошибка транскрибации: {e}")
