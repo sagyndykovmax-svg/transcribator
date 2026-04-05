@@ -47,14 +47,13 @@ def find_ffmpeg() -> str:
     )
 
 
-def convert_to_mp3(ffmpeg: str, input_path: str, output_path: str) -> None:
-    """Convert audio to MP3 16kHz mono — compatible with SpeechKit."""
+def convert_to_pcm(ffmpeg: str, input_path: str, output_path: str) -> None:
+    """Convert audio to raw PCM 16kHz mono — universally supported by SpeechKit."""
     cmd = [
         ffmpeg, "-y", "-i", input_path,
         "-ar", "16000",
         "-ac", "1",
-        "-c:a", "libmp3lame",
-        "-q:a", "5",
+        "-f", "s16le",
         output_path,
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -85,14 +84,15 @@ def split_audio(ffmpeg: str, input_path: str, chunk_dir: str, chunk_seconds: int
     start = 0
     idx = 0
     while start < duration:
-        chunk_path = os.path.join(chunk_dir, f"chunk_{idx:04d}.mp3")
+        chunk_path = os.path.join(chunk_dir, f"chunk_{idx:04d}.pcm")
         cmd = [
             ffmpeg, "-y",
             "-ss", str(start),
             "-t", str(chunk_seconds),
             "-i", input_path,
-            "-c:a", "libmp3lame",
-            "-q:a", "5",
+            "-ar", "16000",
+            "-ac", "1",
+            "-f", "s16le",
             chunk_path,
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -111,7 +111,8 @@ def transcribe_chunk(api_key: str, chunk_path: str, lang: str) -> str:
 
     params = {
         "lang": lang,
-        "format": "mp3",
+        "format": "lpcm",
+        "sampleRateHertz": "16000",
     }
     headers = {"Authorization": f"Api-Key {api_key}"}
 
@@ -141,15 +142,15 @@ def transcribe(audio_path: str, lang: str, api_key: str, verbose: bool = True) -
 
     with tempfile.TemporaryDirectory() as tmp:
         if verbose:
-            print(f"Converting {audio_path} to MP3...")
-        mp3_path = os.path.join(tmp, "audio.mp3")
-        convert_to_mp3(ffmpeg, audio_path, mp3_path)
+            print(f"Converting {audio_path} to PCM...")
+        pcm_path = os.path.join(tmp, "audio.pcm")
+        convert_to_pcm(ffmpeg, audio_path, pcm_path)
 
         if verbose:
-            duration = get_duration(ffmpeg, mp3_path)
+            duration = get_duration(ffmpeg, audio_path)
             print(f"Duration: {duration:.1f}s — splitting into {CHUNK_SECONDS}s chunks...")
 
-        chunks = split_audio(ffmpeg, mp3_path, tmp, CHUNK_SECONDS)
+        chunks = split_audio(ffmpeg, pcm_path, tmp, CHUNK_SECONDS)
         total = len(chunks)
 
         if verbose:
