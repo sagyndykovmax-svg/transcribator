@@ -79,7 +79,7 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
 
     logger.info("Bot started")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
