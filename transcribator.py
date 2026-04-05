@@ -62,45 +62,33 @@ def convert_to_pcm(ffmpeg: str, input_path: str, output_path: str) -> None:
 
 
 def get_duration(ffmpeg: str, path: str) -> float:
-    """Return audio duration in seconds."""
-    cmd = [
-        ffmpeg, "-i", path,
-        "-f", "null", "-",
-    ]
+    """Return audio duration in seconds using the original (non-PCM) file."""
+    cmd = [ffmpeg, "-i", path, "-f", "null", "-"]
     result = subprocess.run(cmd, capture_output=True, text=True)
     for line in result.stderr.splitlines():
         if "Duration" in line:
-            # Duration: HH:MM:SS.ms
             dur_str = line.strip().split("Duration:")[1].split(",")[0].strip()
             h, m, s = dur_str.split(":")
             return int(h) * 3600 + int(m) * 60 + float(s)
     raise RuntimeError("Could not determine audio duration.")
 
 
-def split_audio(ffmpeg: str, input_path: str, chunk_dir: str, chunk_seconds: int) -> list[str]:
-    """Split audio into chunks of chunk_seconds. Returns list of chunk paths."""
-    duration = get_duration(ffmpeg, input_path)
+def split_pcm(pcm_path: str, chunk_dir: str, chunk_seconds: int) -> list[str]:
+    """Split raw PCM (16kHz, 16-bit mono) into chunks by byte offset."""
+    bytes_per_second = 16000 * 2  # 16kHz * 2 bytes per sample
+    chunk_size = chunk_seconds * bytes_per_second
     chunks = []
-    start = 0
-    idx = 0
-    while start < duration:
-        chunk_path = os.path.join(chunk_dir, f"chunk_{idx:04d}.pcm")
-        cmd = [
-            ffmpeg, "-y",
-            "-ss", str(start),
-            "-t", str(chunk_seconds),
-            "-i", input_path,
-            "-ar", "16000",
-            "-ac", "1",
-            "-f", "s16le",
-            chunk_path,
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(f"ffmpeg split failed:\n{result.stderr}")
-        chunks.append(chunk_path)
-        start += chunk_seconds
-        idx += 1
+    with open(pcm_path, "rb") as f:
+        idx = 0
+        while True:
+            data = f.read(chunk_size)
+            if not data:
+                break
+            chunk_path = os.path.join(chunk_dir, f"chunk_{idx:04d}.pcm")
+            with open(chunk_path, "wb") as cf:
+                cf.write(data)
+            chunks.append(chunk_path)
+            idx += 1
     return chunks
 
 
@@ -150,7 +138,7 @@ def transcribe(audio_path: str, lang: str, api_key: str, verbose: bool = True) -
             duration = get_duration(ffmpeg, audio_path)
             print(f"Duration: {duration:.1f}s — splitting into {CHUNK_SECONDS}s chunks...")
 
-        chunks = split_audio(ffmpeg, pcm_path, tmp, CHUNK_SECONDS)
+        chunks = split_pcm(pcm_path, tmp, CHUNK_SECONDS)
         total = len(chunks)
 
         if verbose:
