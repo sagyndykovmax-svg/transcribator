@@ -7,7 +7,7 @@ import logging
 import os
 import tempfile
 
-from groq import Groq
+import google.generativeai as genai
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
@@ -24,29 +24,24 @@ logger = logging.getLogger(__name__)
 
 YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 
 def format_text(text: str) -> str:
-    """Add punctuation and paragraph breaks using Groq."""
-    if not GROQ_API_KEY:
+    """Add punctuation and paragraph breaks using Gemini."""
+    if not GEMINI_API_KEY:
         return text
-    client = Groq(api_key=GROQ_API_KEY)
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        max_tokens=8192,
-        messages=[{
-            "role": "user",
-            "content": (
-                "Ты редактор текста. Твоя задача — расставить знаки препинания (точки, запятые, вопросительные и восклицательные знаки) "
-                "и разбить текст на абзацы по смыслу. "
-                "Не меняй ни одного слова, не добавляй и не убирай слова. "
-                "Верни только отредактированный текст, без пояснений.\n\n"
-                "Текст:\n" + text
-            ),
-        }],
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel("gemini-2.0-flash")
+    prompt = (
+        "Ты редактор текста. Твоя задача — расставить знаки препинания (точки, запятые, вопросительные и восклицательные знаки) "
+        "и разбить текст на абзацы по смыслу. "
+        "Не меняй ни одного слова, не добавляй и не убирай слова. "
+        "Верни только отредактированный текст, без пояснений.\n\n"
+        "Текст:\n" + text
     )
-    return response.choices[0].message.content
+    response = model.generate_content(prompt)
+    return response.text
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -87,7 +82,7 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await message.reply_text("Не удалось распознать речь.")
         return
 
-    if GROQ_API_KEY:
+    if GEMINI_API_KEY:
         await message.reply_text("Форматирую...")
         try:
             text = format_text(text)
