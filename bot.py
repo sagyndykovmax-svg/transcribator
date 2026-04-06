@@ -7,6 +7,7 @@ import logging
 import os
 import tempfile
 
+from groq import Groq
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
@@ -23,6 +24,27 @@ logger = logging.getLogger(__name__)
 
 YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+
+def format_text(text: str) -> str:
+    """Add punctuation and paragraph breaks using Groq."""
+    if not GROQ_API_KEY:
+        return text
+    client = Groq(api_key=GROQ_API_KEY)
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        max_tokens=8192,
+        messages=[{
+            "role": "user",
+            "content": (
+                "Расставь знаки препинания и раздели на абзацы следующий текст. "
+                "Не меняй слова, не добавляй ничего лишнего, только пунктуация и абзацы.\n\n"
+                + text
+            ),
+        }],
+    )
+    return response.choices[0].message.content
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -62,6 +84,13 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not text.strip():
         await message.reply_text("Не удалось распознать речь.")
         return
+
+    if GROQ_API_KEY:
+        await message.reply_text("Форматирую...")
+        try:
+            text = format_text(text)
+        except Exception as e:
+            logger.error("Formatting error: %s", e)
 
     # Telegram message limit is 4096 chars — split if needed
     for i in range(0, len(text), 4096):
