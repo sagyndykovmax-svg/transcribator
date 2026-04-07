@@ -118,11 +118,16 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             ffmpeg = find_ffmpeg()
             duration = get_duration(ffmpeg, audio_path)
             duration_str = seconds_to_human(duration)
-            est_seconds = max(10, int(duration / 6))
-            est_str = seconds_to_human(est_seconds)
+            # ~1.5s per 25s chunk + 2s conversion overhead
+            chunks = max(1, int(duration / 25) + 1)
+            est_seconds = int(chunks * 1.5 + 2)
+            if est_seconds < 10:
+                est_str = "несколько секунд"
+            else:
+                est_str = f"~{seconds_to_human(est_seconds)}"
             await message.reply_text(
                 f"Длительность: {duration_str}\n"
-                f"Транскрибирую, это займёт ~{est_str}..."
+                f"Транскрибирую, это займёт {est_str}..."
             )
         except Exception:
             await message.reply_text("Транскрибирую...")
