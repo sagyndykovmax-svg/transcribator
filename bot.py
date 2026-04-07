@@ -3,6 +3,7 @@ Telegram bot for audio transcription via Yandex SpeechKit.
 Handles voice messages and audio file uploads.
 """
 
+import io
 import logging
 import os
 import tempfile
@@ -12,7 +13,7 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
-from transcribator import transcribe
+from transcribator import transcribe, get_duration, find_ffmpeg
 
 load_dotenv()
 
@@ -25,6 +26,9 @@ logger = logging.getLogger(__name__)
 YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+MAX_FILE_MB = 50  # reject files larger than this
+TEXT_AS_FILE_CHARS = 1000  # send as .txt file if longer
 
 
 def format_text(text: str) -> str:
@@ -44,54 +48,116 @@ def format_text(text: str) -> str:
     return response.text
 
 
+def seconds_to_human(seconds: float) -> str:
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds} сек"
+    m, s = divmod(seconds, 60)
+    return f"{m} мин {s} сек" if s else f"{m} мин"
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "Привет! Отправь голосовое сообщение или аудиофайл — я транскрибирую его в текст."
+        "Привет! Я транскрибирую аудио в текст.\n\n"
+        "Просто отправь голосовое сообщение или аудиофайл.\n\n"
+        "Поддерживаемые форматы: m4a, mp3, ogg, wav, opus, flac и другие.\n"
+        "Максимальный размер файла: 50 МБ.\n\n"
+        "Язык определяется автоматически (русский, английский и др.).\n\n"
+        "/help — помощь"
+    )
+
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "Как пользоваться:\n\n"
+        "1. Отправь голосовое сообщение или аудиофайл\n"
+        "2. Дождись транскрибации\n"
+        "3. Получи текст\n\n"
+        "Если текст длинный — он придёт как файл .txt, удобный для копирования.\n\n"
+        "Поддерживаемые форматы:\n"
+        "m4a, mp3, ogg, opus, wav, flac, wma и другие\n\n"
+        "Ограничения:\n"
+        f"— Максимальный размер файла: {MAX_FILE_MB} МБ\n"
+        "— Язык определяется автоматически\n\n"
+        "По вопросам: @sagyndykovmax"
     )
 
 
 async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.message
 
-    # Determine file source: voice or audio
     if message.voice:
-        tg_file = await message.voice.get_file()
+        tg_file_obj = message.voice
         ext = ".ogg"
+        file_size = tg_file_obj.file_size
     elif message.audio:
-        tg_file = await message.audio.get_file()
-        # Try to preserve original extension
-        name = message.audio.file_name or "audio.mp3"
+        tg_file_obj = message.audio
+        name = tg_file_obj.file_name or "audio.mp3"
         ext = os.path.splitext(name)[1] or ".mp3"
+        file_size = tg_file_obj.file_size
     else:
         return
 
-    await message.reply_text("Транскрибирую...")
+    # Check file size
+    if file_size and file_size > MAX_FILE_MB * 1024 * 1024:
+        size_mb = file_size / 1024 / 1024
+        await message.reply_text(
+            f"Файл слишком большой ({size_mb:.1f} МБ). "
+            f"Максимум — {MAX_FILE_MB} МБ. "
+            "Попробуйте сжать аудио или разбить на части."
+        )
+        return
 
     with tempfile.TemporaryDirectory() as tmp:
         audio_path = os.path.join(tmp, f"audio{ext}")
+        tg_file = await tg_file_obj.get_file()
         await tg_file.download_to_drive(audio_path)
+
+        # Get duration and inform user
+        try:
+            ffmpeg = find_ffmpeg()
+            duration = get_duration(ffmpeg, audio_path)
+            duration_str = seconds_to_human(duration)
+            est_seconds = max(10, int(duration / 6))
+            est_str = seconds_to_human(est_seconds)
+            await message.reply_text(
+                f"Длительность: {duration_str}\n"
+                f"Транскрибирую, это займёт ~{est_str}..."
+            )
+        except Exception:
+            await message.reply_text("Транскрибирую...")
 
         try:
             text = transcribe(audio_path, lang="auto", api_key=YANDEX_API_KEY, verbose=False)
         except Exception as e:
             logger.error("Transcription error: %s", e)
-            await message.reply_text(f"Ошибка транскрибации: {e}")
+            await message.reply_text(
+                "Не удалось обработать аудио. "
+                "Убедитесь что файл не повреждён и попробуйте ещё раз."
+            )
             return
 
     if not text.strip():
-        await message.reply_text("Не удалось распознать речь.")
+        await message.reply_text("Не удалось распознать речь в этом аудио.")
         return
 
     if GEMINI_API_KEY:
-        await message.reply_text("Форматирую...")
         try:
             text = format_text(text)
         except Exception as e:
             logger.error("Formatting error: %s", e)
 
-    # Telegram message limit is 4096 chars — split if needed
-    for i in range(0, len(text), 4096):
-        await message.reply_text(text[i:i + 4096])
+    # Send as file if text is long, otherwise as message
+    if len(text) > TEXT_AS_FILE_CHARS:
+        file_bytes = io.BytesIO(text.encode("utf-8"))
+        file_bytes.name = "transcription.txt"
+        await message.reply_document(
+            document=file_bytes,
+            filename="transcription.txt",
+            caption=f"Транскрипция готова ({len(text)} символов)"
+        )
+    else:
+        await message.reply_text(text)
 
 
 def main() -> None:
@@ -102,6 +168,7 @@ def main() -> None:
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
 
     logger.info("Bot started")
