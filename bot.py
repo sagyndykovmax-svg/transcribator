@@ -27,7 +27,7 @@ YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-MAX_FILE_MB = 50  # reject files larger than this
+MAX_FILE_MB = 20  # Telegram Bot API limit for downloads
 TEXT_AS_FILE_CHARS = 1000  # send as .txt file if longer
 
 
@@ -102,9 +102,11 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if file_size and file_size > MAX_FILE_MB * 1024 * 1024:
         size_mb = file_size / 1024 / 1024
         await message.reply_text(
-            f"Файл слишком большой ({size_mb:.1f} МБ). "
-            f"Максимум — {MAX_FILE_MB} МБ. "
-            "Попробуйте сжать аудио или разбить на части."
+            f"Файл слишком большой ({size_mb:.1f} МБ). Максимум — {MAX_FILE_MB} МБ.\n\n"
+            "Как уменьшить файл:\n"
+            "1. На iPhone: запись → поделиться → сохранить через голосовые сообщения\n"
+            "2. Разбейте запись на части по 15-20 минут\n"
+            "3. Используйте приложение Voice Recorder вместо стандартного"
         )
         return
 
