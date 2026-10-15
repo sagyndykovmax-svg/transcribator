@@ -137,7 +137,7 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         try:
             text = transcribe(audio_path, lang="auto", api_key=YANDEX_API_KEY, verbose=False)
         except Exception as e:
-            logger.error("Transcription error: %s", e)
+            logger.exception("Transcription error: %s", e)
             await message.reply_text(
                 "Не удалось обработать аудио. "
                 "Убедитесь что файл не повреждён и попробуйте ещё раз."

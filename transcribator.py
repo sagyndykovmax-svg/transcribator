@@ -9,6 +9,7 @@ Yandex SpeechKit synchronous recognition API, then the results are combined.
 """
 
 import argparse
+import logging
 import os
 import subprocess
 import sys
@@ -20,6 +21,8 @@ import requests
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 SPEECHKIT_URL = "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize"
 CHUNK_SECONDS = 25
@@ -104,25 +107,31 @@ def transcribe_chunk(api_key: str, chunk_path: str, lang: str) -> str:
     }
     headers = {"Authorization": f"Api-Key {api_key}"}
 
-    for attempt in range(3):
-        resp = requests.post(
-            SPEECHKIT_URL,
-            params=params,
-            headers=headers,
-            data=data,
-            timeout=30,
-        )
+    last_error = ""
+    for attempt in range(5):
+        try:
+            resp = requests.post(
+                SPEECHKIT_URL,
+                params=params,
+                headers=headers,
+                data=data,
+                timeout=60,
+            )
+        except requests.RequestException as e:
+            # Network error / timeout — wait and retry
+            last_error = f"network error: {e}"
+            time.sleep(2 ** attempt)
+            continue
         if resp.status_code == 200:
             result = resp.json()
             return result.get("result", "")
-        if resp.status_code == 429:
-            # Rate limit — wait and retry
+        last_error = f"SpeechKit error {resp.status_code}: {resp.text}"
+        if resp.status_code == 429 or resp.status_code >= 500:
+            # Rate limit or server error — wait and retry
             time.sleep(2 ** attempt)
             continue
-        raise RuntimeError(
-            f"SpeechKit error {resp.status_code}: {resp.text}"
-        )
-    raise RuntimeError("SpeechKit: too many retries (rate limited).")
+        raise RuntimeError(last_error)
+    raise RuntimeError(f"SpeechKit: too many retries ({last_error})")
 
 
 def transcribe(audio_path: str, lang: str, api_key: str, verbose: bool = True) -> str:
@@ -145,13 +154,26 @@ def transcribe(audio_path: str, lang: str, api_key: str, verbose: bool = True) -
             print(f"Transcribing {total} chunk(s)...")
 
         parts = []
+        failed = 0
         for i, chunk in enumerate(chunks, 1):
             if verbose:
                 print(f"  [{i}/{total}] chunk {i}...", end=" ", flush=True)
-            text = transcribe_chunk(api_key, chunk, lang)
+            try:
+                text = transcribe_chunk(api_key, chunk, lang)
+            except Exception as e:
+                # Don't lose the whole transcription because of one bad chunk
+                failed += 1
+                logger.warning("Chunk %d/%d failed: %s", i, total, e)
+                if verbose:
+                    print(f"failed: {e}")
+                parts.append("[...]")
+                continue
             if verbose:
                 print("ok")
             parts.append(text)
+
+        if failed == total:
+            raise RuntimeError(f"All {total} chunk(s) failed to transcribe.")
 
     return " ".join(p for p in parts if p)
 
