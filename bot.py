@@ -22,10 +22,13 @@ logging.basicConfig(
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
+# httpx logs every request URL, which includes the bot token
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 YANDEX_API_KEY = os.getenv("YANDEX_API_KEY")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
 
 MAX_FILE_MB = 20  # Telegram Bot API limit for downloads
 TEXT_AS_FILE_CHARS = 1000  # send as .txt file if longer
@@ -36,7 +39,7 @@ def format_text(text: str) -> str:
     if not GEMINI_API_KEY:
         return text
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    model = genai.GenerativeModel(GEMINI_MODEL)
     prompt = (
         "Ты редактор текста. Твоя задача — расставить знаки препинания (точки, запятые, вопросительные и восклицательные знаки) "
         "и разбить текст на абзацы по смыслу. "
